@@ -1,0 +1,97 @@
+diff --git a/control/descriptor_helpers.c b/control/descriptor_helpers.c
+index 4cfae564..53f07f24 100644
+--- a/control/descriptor_helpers.c
++++ b/control/descriptor_helpers.c
+@@ -38,9 +38,76 @@
+ #include "control/descriptor.h"
+ #include "chameleon/runtime.h"
+ 
++/**
++ * @brief Custom, file-based tile distribution used to override the classic
++ * 2D Block Cyclic mapping of chameleon_getrankof_2d() (e.g. to reproduce
++ * arbitrary distributions such as 1D-1D computed offline).
++ *
++ * The distribution is read from the file named by the CHAMELEON_DIST_FILE
++ * environment variable (or "dist" in the current working directory if that
++ * variable is unset). The file must hold, on its first line, the tile grid
++ * size as "M N", followed by M lines of N whitespace separated integers
++ * giving the 1-indexed MPI rank owning tile (m, n). If the file cannot be
++ * found, chameleon_getrankof_2d() transparently falls back to the classic
++ * 2D Block Cyclic distribution.
++ */
++typedef struct chameleon_custom_dist_s {
++    int  state;  /**> 0: not loaded yet, 1: loaded, -1: no distribution file found */
++    int *rankof; /**> Flattened MxN array of tile owners                          */
++    int  m, n;   /**> Size of the tile grid described by the distribution file    */
++} chameleon_custom_dist_t;
++
++static chameleon_custom_dist_t chameleon_custom_dist = { 0, NULL, 0, 0 };
++
++static void chameleon_custom_dist_load( chameleon_custom_dist_t *dist, const CHAM_desc_t *A )
++{
++    const char *filename = getenv( "CHAMELEON_DIST_FILE" );
++    FILE       *f;
++    int         i, j;
++
++    if ( filename == NULL ) {
++        filename = "dist";
++    }
++
++    f = fopen( filename, "r" );
++    if ( f == NULL ) {
++        dist->state = -1;
++        return;
++    }
++
++    if ( fscanf( f, "%d %d", &(dist->m), &(dist->n) ) != 2 ) {
++        chameleon_error( "chameleon_getrankof_2d", "invalid distribution file header" );
++        fclose( f );
++        exit(1);
++    }
++    if ( (dist->m != A->lmt) || (dist->n != A->lnt) ) {
++        chameleon_error( "chameleon_getrankof_2d", "distribution file tile grid size does not match the matrix" );
++        fclose( f );
++        exit(1);
++    }
++
++    dist->rankof = malloc( dist->m * dist->n * sizeof(int) );
++    assert( dist->rankof != NULL );
++
++    for ( i = 0; i < dist->m; i++ ) {
++        for ( j = 0; j < dist->n; j++ ) {
++            if ( fscanf( f, "%d", dist->rankof + i * dist->n + j ) != 1 ) {
++                chameleon_error( "chameleon_getrankof_2d", "invalid distribution file content" );
++                fclose( f );
++                exit(1);
++            }
++            dist->rankof[ i * dist->n + j ] -= 1; /* File is 1-indexed */
++        }
++    }
++    fclose( f );
++
++    dist->state = 1;
++}
++
+ /**
+  * @brief Return the rank of the tile A( m, n ) in a classic 2D Block Cyclic
+- * distribution PxQ.
++ * distribution PxQ, or in the custom distribution described by
++ * chameleon_custom_dist_load() when a distribution file is available.
+  *
+  * @param[in] A
+  *        The matrix descriptor in which to find the tile.
+@@ -58,6 +125,14 @@ int chameleon_getrankof_2d( const CHAM_desc_t *A, int m, int n )
+ {
+     int mm = m + A->i / A->mb;
+     int nn = n + A->j / A->nb;
++
++    if ( chameleon_custom_dist.state == 0 ) {
++        chameleon_custom_dist_load( &chameleon_custom_dist, A );
++    }
++    if ( chameleon_custom_dist.state == 1 ) {
++        return chameleon_custom_dist.rankof[ mm * chameleon_custom_dist.n + nn ];
++    }
++
+     return (mm % chameleon_desc_datadist_get_iparam(A,0)) * chameleon_desc_datadist_get_iparam(A,1) + (nn % chameleon_desc_datadist_get_iparam(A,1));
+ }
+ 
