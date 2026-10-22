@@ -1,0 +1,72 @@
+#+TITLE: otho Guix channel
+
+Personal [[https://guix.gnu.org][Guix]] channel with package variants for HPC
+work: StarPU/Chameleon variants (energy, SimGrid, FxT), StarVZ/PajeNG, and
+ExaGeoStat.
+
+* Use
+
+Add it to =~/.config/guix/channels.scm= and run ~guix pull~:
+
+#+begin_src scheme
+(channel
+  (name 'otho)
+  (url "https://github.com/othomarcondes/guix-otho.git")
+  (branch "main"))
+#+end_src
+
+It depends on the ~guix-hpc~, ~guix-science~ and ~guix-science-nonfree~
+channels (see =.guix-channel=).
+
+Without pulling it, load the modules from a checkout with ~-L~:
+
+#+begin_src sh
+guix build -L ~/dev/guix-otho/modules exageostat
+#+end_src
+
+* Pinned versions
+
+=channels.scm= records the exact channel commits these packages were last
+built and tested against (from ~guix describe -f channels~). To reproduce that
+environment from a checkout:
+
+#+begin_src sh
+guix time-machine -C channels.scm -- build -L modules exageostat
+#+end_src
+
+After a ~guix pull~ you've tested, refresh it with
+~guix describe -f channels~ (keep the header comment).
+
+* Modules
+
+All modules live in =modules/otho/packages/=:
+
+| Module                       | Packages                                                                                                                                                                                                                                            |
+|------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ~(otho packages energy)~     | ~energy-reader~, ~energy-reader-nvml~, ~energy-solver~, ~papi-custom~, ~starpu-energy~, ~starpu-cuda-energy~, ~chameleon-energy~, ~chameleon-cuda-energy~, ~chameleon-mkl-energy~, ~chameleon-cuda-mkl-energy~                                      |
+| ~(otho packages simgrid)~    | StarPU/Chameleon variants for SimGrid with FxT: ~starpu-simgrid-fxt~, ~starpu-simgrid-mpi-fxt~, ~starpu-simgrid-mpi-fxt-fixed~, ~chameleon-simgrid-static~, ~chameleon-simgrid-fxt~, ~chameleon-simgrid-nosmpi-fxt~, ~chameleon-simgrid-v130-fixed~ |
+| ~(otho packages starvz)~     | ~pajeng~, ~r-starvz~                                                                                                                                                                                                                                |
+| ~(otho packages exageostat)~ | ~exageostat~, ~exageostat-cuda~, ~exageostat-chameleon-1.1~                                                                                                                                                                                         |
+
+The ExaGeoStat packages are:
+
+- ~exageostat~: [[https://github.com/ecrc/exageostat][ExaGeoStat]] 1.2.2 with MPI, on Chameleon 1.4.0 and StarPU 1.4.12.
+- ~exageostat-cuda~: the same with CUDA (MPI + CUDA).
+- ~exageostat-chameleon-1.1~: built on the Chameleon 1.1.0 + StarPU 1.3.11 its submodule pins, kept for comparison.
+
+~energy-solver~ keeps its SQLite database in ~$ENERGY_SOLVER_DATA_DIR~.
+Set it to a writable directory, since the default (next to the code) is in
+the read-only store. Use it with ~python@3.12~, the version Guix builds
+Python packages against (plain ~python~ is 3.13):
+
+#+begin_src sh
+ENERGY_SOLVER_DATA_DIR=~/energy-solver-data guix shell python@3.12 energy-solver
+#+end_src
+
+=modules/otho/packages/patches/chameleon_1d1d_dist.patch= is kept for reference;
+no package uses it.
+
+When running ExaGeoStat, set ~OMP_NUM_THREADS=1~. Guix's OpenBLAS uses
+OpenMP, so otherwise every StarPU worker starts its own thread team. On a
+foreign distro, ~exageostat-cuda~ also needs the host's =libcuda.so.1= on
+~LD_LIBRARY_PATH~.
